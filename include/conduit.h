@@ -4,18 +4,22 @@
 #include "reference_queue.h"
 #include <sys/eventfd.h>
 
+/* Inspired by: /tylertreat/chan */
+
 struct AsyncConduit
 {
     mtx_t mtx;
-    mtx_t r_mtx;
-    mtx_t w_mtx;
+    mtx_t recv_mtx;
+    mtx_t send_mtx;
 
     cnd_t recv_event;
     cnd_t send_event;
     
     void* data;
 
-    uint32_t awaiting_recievers;
+    bool closed;
+
+    uint32_t awaiting_receivers;
     uint32_t awaiting_senders;
     int recv_event_fd;
 };
