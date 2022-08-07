@@ -19,6 +19,7 @@ static void destruct_conditionals(
     }
 }
 
+
 static void destruct_mutexs(
     mtx_t** array,
     const size_t count)
@@ -30,6 +31,16 @@ static void destruct_mutexs(
         }
 
     }
+}
+
+static enum OKorERR relenquish_mtx_ret(
+    mtx_t* mtx,
+    const enum OKorERR ret_val)
+{
+    if (thrd_success != mtx_unlock(mtx)) {
+        return ERR;
+    }
+    return ret_val;
 }
 
 
@@ -79,6 +90,45 @@ static enum OKorERR acquire_all_mutexs_or_relenquish(
     return OK;
 }
 
+enum OKorERR async_conduit_close(
+    struct AsyncConduit* asy_con)
+{
+    if (thrd_success != mtx_lock(&asy_con->mtx)) {
+        return ERR;
+    }
+
+    if (asy_con->closed) {
+        return
+            relenquish_mtx_ret(
+                &asy_con->mtx,
+                ERR
+            );
+    }
+
+    asy_con->closed = true;
+
+    cnd_t* conditions_to_broadcast[] = {
+        &asy_con->recv_event,
+        &asy_con->send_event
+    };
+
+    for (int i = 0; i < ARRAY_SIZE(conditions_to_broadcast); i++) {
+        if (thrd_success != cnd_broadcast(conditions_to_broadcast[i])) {
+            return
+                relenquish_mtx_ret(
+                    &asy_con->mtx,
+                    ERR
+                );
+        }
+    }
+
+    return
+        relenquish_mtx_ret(
+            &asy_con->mtx,
+            OK
+        );
+}
+
 enum OKorERR async_conduit_destruct(
     struct AsyncConduit* asy_con)
 {
@@ -103,6 +153,10 @@ enum OKorERR async_conduit_destruct(
         ARRAY_SIZE(conditionals_to_destruct)
     );
 
+
+    if (0 != close(asy_con->recv_event_fd)) {
+        return ERR;
+    }
 
     return OK;
 }
@@ -132,8 +186,9 @@ enum OKorERR async_conduit_recv_msg(
 
     bool err = false;
     while (!asy_con->closed && asy_con->awaiting_senders == 0) {
-        asy_con->awaiting_receivers++;
+        asy_con->awaiting_receivers++;  
 
+        /* await the event that there's a message to receive */
         if (thrd_success !=
             cnd_wait(
                 &asy_con->recv_event,
@@ -172,6 +227,7 @@ enum OKorERR async_conduit_recv_msg(
 
     asy_con->awaiting_senders--;
 
+    /* EVENT: message consumed, now we're writeable again */
     if (thrd_success != cnd_signal(&asy_con->send_event)) {
         const enum OKorERR _ =
             release_all_mutexs_or_reterr(
@@ -224,7 +280,7 @@ enum OKorERR async_conduit_send_msg(
     asy_con->awaiting_senders++;
 
     if (asy_con->awaiting_receivers > 0) {
-
+        /* EVENT: there's a message to receive now. */
         if (thrd_success != cnd_signal(&asy_con->recv_event)) {
             const enum OKorERR _ = 
                 release_all_mutexs_or_reterr(
@@ -235,6 +291,7 @@ enum OKorERR async_conduit_send_msg(
         }
     }
 
+    /* await the event that the message was consumed. */
     if (thrd_success != 
         cnd_wait(
             &asy_con->send_event,
@@ -408,15 +465,6 @@ enum OKorERR conduit_construct(
 }
 
 
-static enum OKorERR relenquish_mtx_ret(
-    mtx_t* mtx,
-    const enum OKorERR ret_val)
-{
-    if (thrd_success != mtx_unlock(mtx)) {
-        return ERR;
-    }
-    return ret_val;
-}
 
 static struct timespec ms2ts(
     unsigned long ms)
