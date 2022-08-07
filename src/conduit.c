@@ -4,9 +4,117 @@
 
 #include "conduit.h"
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
+
+static void destruct_conditionals(
+    cnd_t** array,
+    const size_t count)
+{
+    for (int i = 0; i < count; i++) {
+
+        if (NULL != array[i]) {
+            cnd_destroy(array[i]);
+        }
+
+    }
+}
+
+static void destruct_mutexs(
+    mtx_t** array,
+    const size_t count)
+{
+    for (int i = 0; i < count; i++) {
+
+        if (NULL != array[i]) {
+            mtx_destroy(array[i]);
+        }
+
+    }
+}
+
 enum OKorERR async_conduit_destruct(
     struct AsyncConduit* asy_con)
 {
+    
+    mtx_t* mutexs_to_destruct[] = {
+        &asy_con->mtx,
+        &asy_con->r_mtx,
+        &asy_con->w_mtx
+    };
+
+    #define MUTEX_COUNT ARRAY_SIZE(mutexs_to_destruct)
+
+    destruct_mutexs(
+        mutexs_to_destruct,
+        MUTEX_COUNT
+    );
+
+    cnd_t* conditionals_to_destruct[] = {
+        &asy_con->send_event,
+        &asy_con->recv_event
+    };
+    destruct_conditionals(
+        conditionals_to_destruct,
+        ARRAY_SIZE(conditionals_to_destruct)
+    );
+
+}
+
+enum OKorERR async_conduit_construct(
+    struct AsyncConduit* asy_con)
+{
+
+    mtx_t* mutexs_to_construct[] = {
+        &asy_con->mtx,
+        &asy_con->r_mtx,
+        &asy_con->w_mtx
+    };
+
+    #define MUTEX_COUNT ARRAY_SIZE(mutexs_to_construct)
+    
+    mtx_t* mutexs_to_destruct[MUTEX_COUNT] = {0};
+
+    int err_cnt = 0;
+    for (int i = 0; i < ARRAY_SIZE(mutexs_to_construct); i++) {
+        if (thrd_success != mtx_init(mutexs_to_construct[i], mtx_plain)) {
+            mutexs_to_destruct[i] = mutexs_to_construct[i];
+        }
+        err_cnt++;
+    }
+
+    if (err_cnt > 0) {
+        destruct_mutexs(
+            mutexs_to_destruct,
+            err_cnt
+        );
+        return ERR;
+    }
+
+    cnd_t* conditionals_to_construct[] = {
+        &asy_con->send_event,
+        &asy_con->recv_event
+    };
+
+    for (int i = 0; i < ARRAY_SIZE(conditionals_to_construct); i++) {
+        cnd_t* cnd = conditionals_to_construct[i];
+        if (thrd_success != cnd_init(cnd)) {
+
+            if (i >= 1) {
+                cnd_destroy(conditionals_to_construct[0]);
+            }
+
+            destruct_mutexs(
+                mutexs_to_construct,
+                MUTEX_COUNT
+            );
+
+            if (0 != close(asy_con->recv_event_fd)) {
+                
+            }
+
+            return ERR;
+        } 
+    }
 
     return OK;
 }
@@ -15,10 +123,6 @@ enum OKorERR conduit_destruct(
     struct Conduit* con)
 {
     ref_q_destruct(&con->queue);  
-        
-    if (0 != close(con->recv_event_fd)) {
-        return ERR;
-    }
 
     mtx_destroy(&con->mtx);
 
@@ -26,9 +130,13 @@ enum OKorERR conduit_destruct(
         &con->send_event,
         &con->recv_event
     };
-    for (int i = 0; i < 2; i++) {
-        cnd_t* cnd = conditionals[i];
-        cnd_destroy(cnd);
+    destruct_conditionals(
+        conditionals,
+        ARRAY_SIZE(conditionals)
+    );
+
+    if (0 != close(con->recv_event_fd)) {
+        return ERR;
     }
 
     return OK;
@@ -49,7 +157,14 @@ enum OKorERR conduit_construct(
         return ERR;
     }
 
-    con->recv_event_fd = eventfd(0, 0);
+    int event_fd = eventfd(0, 0);
+
+    if (-1 == event_fd) {
+        ref_q_destruct(&con->queue);
+        return ERR;
+    }
+
+    con->recv_event_fd = event_fd;
 
     if (thrd_success !=
         mtx_init(
@@ -57,6 +172,10 @@ enum OKorERR conduit_construct(
             mtx_plain
         )
     ) {    
+        ref_q_destruct(&con->queue);
+        if (0 != close(con->recv_event_fd)) {
+            
+        }
         return ERR;
     }
 
@@ -64,13 +183,26 @@ enum OKorERR conduit_construct(
         &con->send_event,
         &con->recv_event
     };
-    for (int i = 0; i < 2; i++) {
+
+    for (int i = 0; i < ARRAY_SIZE(conditionals); i++) {
         cnd_t* cnd = conditionals[i];
         if (thrd_success != cnd_init(cnd)) {
+
+            if (i >= 1) {
+                cnd_destroy(conditionals[0]);
+            }
+
+            mtx_destroy(&con->mtx);
+            ref_q_destruct(&con->queue);
+            if (0 != close(con->recv_event_fd)) {
+                
+            }
+
             return ERR;
-        }
+        } 
     }
     
+
     return OK;
 }
 
@@ -162,6 +294,16 @@ enum OKorERR conduit_recv_msg(
         }
     }
 
+    if (REFQ_OK == dequeue 
+    && 0 !=
+        eventfd_read(
+            con->recv_event_fd,
+            NULL
+        )
+    ) {
+        return relenquish_mtx_ret(&con->mtx, ERR);
+    }
+
     return
         relenquish_mtx_ret(&con->mtx, OK) == OK 
         && REFQ_OK == dequeue
@@ -218,7 +360,6 @@ enum OKorERR conduit_send_msg(
         }
     }
 
-    static const char zero[] = {0};
     if (REFQ_OK == enq 
     && 0 !=
         eventfd_write(

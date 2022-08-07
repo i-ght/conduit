@@ -10,16 +10,23 @@ struct AsyncConduit
     mtx_t r_mtx;
     mtx_t w_mtx;
 
-    
     cnd_t recv_event;
     cnd_t send_event;
     
     void* data;
-    
+
     uint32_t awaiting_recievers;
     uint32_t awaiting_senders;
     int recv_event_fd;
 };
+
+enum OKorERR async_conduit_construct(
+    struct AsyncConduit* asy_con
+);
+
+enum OKorERR async_conduit_destruct(
+    struct AsyncConduit* asy_con
+);
 
 struct Conduit
 {

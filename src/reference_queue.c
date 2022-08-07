@@ -26,8 +26,10 @@ enum OKorERR ref_q_construct(
 void ref_q_destruct(
     struct RefQueue* ref_q)
 {
-    free(ref_q->data);
-    ref_q->data = NULL;
+    if (NULL != ref_q->data) {
+        free(ref_q->data);
+        ref_q->data = NULL;
+    }
 }
 
 bool ref_q_full(
