@@ -1,3 +1,5 @@
+#define DEBUG
+
 #include <sys/eventfd.h>
 
 #include <unistd.h>
@@ -53,7 +55,7 @@ static enum OKorERR release_all_mutexs_or_reterr(
         if (NULL != array[i]) {
             if (thrd_success != mtx_unlock(array[i])) {
 
-#if DEBUG
+#ifdef DEBUG
                 perror("failed to release mutex\n");
                 exit(1);
 #endif
