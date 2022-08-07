@@ -4,6 +4,13 @@
 
 #include "conduit.h"
 
+enum OKorERR async_conduit_destruct(
+    struct AsyncConduit* asy_con)
+{
+
+    return OK;
+}
+
 enum OKorERR conduit_destruct(
     struct Conduit* con)
 {
@@ -11,6 +18,17 @@ enum OKorERR conduit_destruct(
         
     if (0 != close(con->recv_event_fd)) {
         return ERR;
+    }
+
+    mtx_destroy(&con->mtx);
+
+    cnd_t* conditionals[] = {
+        &con->send_event,
+        &con->recv_event
+    };
+    for (int i = 0; i < 2; i++) {
+        cnd_t* cnd = conditionals[i];
+        cnd_destroy(cnd);
     }
 
     return OK;
@@ -33,6 +51,26 @@ enum OKorERR conduit_construct(
 
     con->recv_event_fd = eventfd(0, 0);
 
+    if (thrd_success !=
+        mtx_init(
+            &con->mtx,
+            mtx_plain
+        )
+    ) {    
+        return ERR;
+    }
+
+    cnd_t* conditionals[] = {
+        &con->send_event,
+        &con->recv_event
+    };
+    for (int i = 0; i < 2; i++) {
+        cnd_t* cnd = conditionals[i];
+        if (thrd_success != cnd_init(cnd)) {
+            return ERR;
+        }
+    }
+    
     return OK;
 }
 
