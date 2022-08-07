@@ -32,6 +32,16 @@ enum OKorERR async_conduit_destruct(
     struct AsyncConduit* asy_con
 );
 
+enum OKorERR async_conduit_send_msg(
+    struct AsyncConduit* asy_con,
+    void* message
+);
+
+enum OKorERR async_conduit_recv_msg(
+    struct AsyncConduit* asy_con,
+    void** message
+);
+
 struct Conduit
 {
     struct RefQueue queue;

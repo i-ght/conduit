@@ -331,8 +331,9 @@ enum OKorERR async_conduit_construct(
     for (int i = 0; i < ARRAY_SIZE(mutexs_to_construct); i++) {
         if (thrd_success != mtx_init(mutexs_to_construct[i], mtx_plain)) {
             mutexs_to_destruct[i] = mutexs_to_construct[i];
+            err_cnt++;
+            continue;
         }
-        err_cnt++;
     }
 
     if (err_cnt > 0) {
