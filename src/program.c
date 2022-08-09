@@ -3,7 +3,10 @@
 
 int thread0(void* arg)
 {
-    struct AsyncConduit* a = (struct AsyncConduit*)arg;
+
+    fgetc(stdin);
+
+    struct UnbufConduit* a = (struct UnbufConduit*)arg;
 
     void* msg = NULL;
     if (ERR ==
@@ -20,14 +23,14 @@ int thread0(void* arg)
 
 int main(void)
 {
-    struct AsyncConduit a = {0};
+    struct UnbufConduit a = {0};
     if (ERR ==
         async_conduit_construct(&a)
     ) {
         return ERR;
     }
 
-    thrd_t t;
+    thrd_t t = {0};
     if (thrd_success != thrd_create(&t, thread0, &a)) {
         return ERR;
     }

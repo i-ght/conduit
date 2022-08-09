@@ -11,5 +11,5 @@ done
 ar rcs bin/libconduit.a $doto_files
 clang -g -shared -o bin/libconduit.so $doto_files
  
-clang -g -o bin/program -L./bin/ -lconduit
+clang -g -o bin/program -L./bin/ -l:libconduit.a
 rm ./src/*.c.o

@@ -6,7 +6,7 @@
 
 /* Inspired by: /tylertreat/chan */
 
-struct AsyncConduit
+struct UnbufConduit
 {
     mtx_t mtx;
     mtx_t recv_mtx;
@@ -24,23 +24,24 @@ struct AsyncConduit
     int recv_event_fd;
 };
 
-enum OKorERR async_conduit_construct(
-    struct AsyncConduit* asy_con
+enum OKorERR unbuf_conduit_construct(
+    struct UnbufConduit* asy_con
 );
 
-enum OKorERR async_conduit_destruct(
-    struct AsyncConduit* asy_con
+enum OKorERR unbuf_conduit_destruct(
+    struct UnbufConduit* asy_con
 );
 
-enum OKorERR async_conduit_send_msg(
-    struct AsyncConduit* asy_con,
+enum OKorERR unbuf_conduit_send_msg(
+    struct UnbufConduit* asy_con,
     void* message
 );
 
-enum OKorERR async_conduit_recv_msg(
-    struct AsyncConduit* asy_con,
+enum OKorERR unbuf_conduit_recv_msg(
+    struct UnbufConduit* asy_con,
     void** message
 );
+
 
 struct Conduit
 {
@@ -48,8 +49,8 @@ struct Conduit
     mtx_t mtx;
     cnd_t recv_event;
     cnd_t send_event;
-    uint32_t awaiting_recievers;
-    uint32_t awaiting_senders;
+    uint32_t awaiting_recvrs;
+    uint32_t awaiting_sendrs;
     bool closed;
     uint32_t capacity;
     int recv_event_fd;
