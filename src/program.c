@@ -1,7 +1,8 @@
 #include "conduit.h"
 
+enum{ERR = -1, OK = 0};
 
-int thread0(void* arg)
+static int thread0(void* arg)
 {
 
     fgetc(stdin);
@@ -10,7 +11,7 @@ int thread0(void* arg)
 
     void* msg = NULL;
     if (ERR ==
-        async_conduit_recv_msg(a, &msg)
+        unbuf_conduit_recv_msg(a, &msg)
     ) {
         return ERR;
     }
@@ -25,7 +26,7 @@ int main(void)
 {
     struct UnbufConduit a = {0};
     if (ERR ==
-        async_conduit_construct(&a)
+        unbuf_conduit_construct(&a)
     ) {
         return ERR;
     }
@@ -36,7 +37,7 @@ int main(void)
     }
 
     if (ERR ==
-        async_conduit_send_msg(
+        unbuf_conduit_send_msg(
             &a,
             "hello world"
         )

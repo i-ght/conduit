@@ -1,7 +1,6 @@
 #include <stdbool.h>
 #include <threads.h>
-#include "okorerr.h"
-#include "reference_queue.h"
+#include "refqueue.h"
 #include <sys/eventfd.h>
 
 /* Inspired by: /tylertreat/chan */
@@ -24,21 +23,21 @@ struct UnbufConduit
     int recv_event_fd;
 };
 
-enum OKorERR unbuf_conduit_construct(
-    struct UnbufConduit* asy_con
+int unbuf_conduit_construct(
+    struct UnbufConduit* unbuf_con
 );
 
-enum OKorERR unbuf_conduit_destruct(
-    struct UnbufConduit* asy_con
+int unbuf_conduit_destruct(
+    struct UnbufConduit* unbuf_con
 );
 
-enum OKorERR unbuf_conduit_send_msg(
-    struct UnbufConduit* asy_con,
+int unbuf_conduit_send_msg(
+    struct UnbufConduit* unbuf_con,
     void* message
 );
 
-enum OKorERR unbuf_conduit_recv_msg(
-    struct UnbufConduit* asy_con,
+int unbuf_conduit_recv_msg(
+    struct UnbufConduit* unbuf_con,
     void** message
 );
 
@@ -60,22 +59,22 @@ int conduit_recv_event_fd(
     const struct Conduit* con
 );
 
-enum OKorERR conduit_destruct(
+int conduit_destruct(
     struct Conduit* con
 );
 
-enum OKorERR conduit_construct(
+int conduit_construct(
     struct Conduit* con,
     const size_t capacity,
-    const MemAlloc mem_alloc
+    const MemoryAllocate mem_alloc
 );
 
-enum OKorERR conduit_recv_msg(
+int conduit_recv_msg(
     struct Conduit* con,
     void** message
 );
 
-enum OKorERR conduit_send_msg(
+int conduit_send_msg(
     struct Conduit* con,
     void* message
 );

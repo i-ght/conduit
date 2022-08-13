@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "conduit.h": "c",
+        "refqueue.h": "c"
+    }
+}

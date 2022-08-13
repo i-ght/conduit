@@ -5,6 +5,7 @@
 
 #include "conduit.h"
 
+enum {ERR=-1, OK=0};
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
 
@@ -36,9 +37,9 @@ static void destruct_mutexs(
     }
 }
 
-static enum OKorERR relenquish_mtx_ret(
+static int relenquish_mtx_ret(
     mtx_t* mtx,
-    const enum OKorERR ret_val)
+    const int ret_val)
 {
     if (thrd_success != mtx_unlock(mtx)) {
         return ERR;
@@ -47,7 +48,18 @@ static enum OKorERR relenquish_mtx_ret(
 }
 
 
-static enum OKorERR release_all_mutexs_or_reterr(
+static void close_fd_ignore_error(
+    int fd)
+{
+    if (0 != close(fd)) {
+#ifdef DEBUG
+        perror("failed to close fd");
+        exit(1);
+#endif
+    }
+}
+
+static int release_all_mutexs_or_reterr(
     mtx_t** array,
     const size_t count)
 {
@@ -70,7 +82,7 @@ static enum OKorERR release_all_mutexs_or_reterr(
 }
 
 
-static enum OKorERR acquire_all_mutexs_or_relenquish(
+static int acquire_all_mutexs_or_relenquish(
     mtx_t** array,
     const size_t count)
 {
@@ -78,7 +90,7 @@ static enum OKorERR acquire_all_mutexs_or_relenquish(
     for (int i = 0; i < count; i++) {
         if (NULL != array[i]) {
             if (thrd_success != mtx_lock(array[i])) {
-                const enum OKorERR _ =
+                const int _ =
                     release_all_mutexs_or_reterr(
                         array,
                         acquired
@@ -93,33 +105,33 @@ static enum OKorERR acquire_all_mutexs_or_relenquish(
     return OK;
 }
 
-enum OKorERR async_conduit_close(
-    struct UnbufConduit* asy_con)
+int unbuf_conduit_close(
+    struct UnbufConduit* unbuf_con)
 {
-    if (thrd_success != mtx_lock(&asy_con->mtx)) {
+    if (thrd_success != mtx_lock(&unbuf_con->mtx)) {
         return ERR;
     }
 
-    if (asy_con->closed) {
+    if (unbuf_con->closed) {
         return
             relenquish_mtx_ret(
-                &asy_con->mtx,
+                &unbuf_con->mtx,
                 ERR
             );
     }
 
-    asy_con->closed = true;
+    unbuf_con->closed = true;
 
     cnd_t* conditions_to_broadcast[] = {
-        &asy_con->recv_event,
-        &asy_con->send_event
+        &unbuf_con->recv_event,
+        &unbuf_con->send_event
     };
 
     for (int i = 0; i < ARRAY_SIZE(conditions_to_broadcast); i++) {
         if (thrd_success != cnd_broadcast(conditions_to_broadcast[i])) {
             return
                 relenquish_mtx_ret(
-                    &asy_con->mtx,
+                    &unbuf_con->mtx,
                     ERR
                 );
         }
@@ -127,19 +139,19 @@ enum OKorERR async_conduit_close(
 
     return
         relenquish_mtx_ret(
-            &asy_con->mtx,
+            &unbuf_con->mtx,
             OK
         );
 }
 
-enum OKorERR async_conduit_destruct(
-    struct UnbufConduit* asy_con)
+int unbuf_conduit_destruct(
+    struct UnbufConduit* unbuf_con)
 {
     
     mtx_t* mutexs_to_destruct[] = {
-        &asy_con->mtx,
-        &asy_con->recv_mtx,
-        &asy_con->send_mtx
+        &unbuf_con->mtx,
+        &unbuf_con->recv_mtx,
+        &unbuf_con->send_mtx
     };
 
     destruct_mutexs(
@@ -148,8 +160,8 @@ enum OKorERR async_conduit_destruct(
     );
 
     cnd_t* conditionals_to_destruct[] = {
-        &asy_con->send_event,
-        &asy_con->recv_event
+        &unbuf_con->send_event,
+        &unbuf_con->recv_event
     };
     destruct_conditionals(
         conditionals_to_destruct,
@@ -157,20 +169,20 @@ enum OKorERR async_conduit_destruct(
     );
 
 
-    if (0 != close(asy_con->recv_event_fd)) {
+    if (0 != close(unbuf_con->recv_event_fd)) {
         return ERR;
     }
 
     return OK;
 }
 
-enum OKorERR async_conduit_recv_msg(
-    struct UnbufConduit* asy_con,
+int unbuf_conduit_recv_msg(
+    struct UnbufConduit* unbuf_con,
     void** message)
 {
     mtx_t* mutexs_to_acquire[] = {
-        &asy_con->recv_mtx,
-        &asy_con->mtx
+        &unbuf_con->recv_mtx,
+        &unbuf_con->mtx
     };
 
     if (OK !=
@@ -183,22 +195,22 @@ enum OKorERR async_conduit_recv_msg(
     }
 
     mtx_t* mutexs_to_release[] = {
-        &asy_con->recv_mtx,
-        &asy_con->mtx
+        &unbuf_con->recv_mtx,
+        &unbuf_con->mtx
     };
 
     bool err = false;
-    while (!asy_con->closed && asy_con->awaiting_senders == 0) {
-        asy_con->awaiting_receivers++;  
+    while (!unbuf_con->closed && unbuf_con->awaiting_senders == 0) {
+        unbuf_con->awaiting_receivers++;  
 
         /* await the event that there's a message to receive */
         if (thrd_success !=
             cnd_wait(
-                &asy_con->recv_event,
-                &asy_con->mtx
+                &unbuf_con->recv_event,
+                &unbuf_con->mtx
             )
         ) {
-            const enum OKorERR _ =
+            const int _ =
                 release_all_mutexs_or_reterr(
                     mutexs_to_release,
                     ARRAY_SIZE(mutexs_to_release)
@@ -207,15 +219,15 @@ enum OKorERR async_conduit_recv_msg(
             err = true;
         }
 
-        asy_con->awaiting_receivers--;
+        unbuf_con->awaiting_receivers--;
 
         if (err) {
             return ERR;
         }
     }
 
-    if (asy_con->closed) {
-        const enum OKorERR _ =
+    if (unbuf_con->closed) {
+        const int _ =
             release_all_mutexs_or_reterr(
                 mutexs_to_release,
                 ARRAY_SIZE(mutexs_to_release)
@@ -224,15 +236,15 @@ enum OKorERR async_conduit_recv_msg(
     }
 
     if (NULL != message) {
-        *message = asy_con->data;
-        asy_con->data = NULL;
+        *message = unbuf_con->data;
+        unbuf_con->data = NULL;
     }
 
-    asy_con->awaiting_senders--;
+    unbuf_con->awaiting_senders--;
 
     /* EVENT: message consumed, now we're writeable again */
-    if (thrd_success != cnd_signal(&asy_con->send_event)) {
-        const enum OKorERR _ =
+    if (thrd_success != cnd_signal(&unbuf_con->send_event)) {
+        const int _ =
             release_all_mutexs_or_reterr(
                 mutexs_to_release,
                 ARRAY_SIZE(mutexs_to_release)
@@ -246,13 +258,13 @@ enum OKorERR async_conduit_recv_msg(
     );
 }
 
-enum OKorERR async_conduit_send_msg(
-    struct UnbufConduit* asy_con,
+int unbuf_conduit_send_msg(
+    struct UnbufConduit* unbuf_con,
     void* message)
 {
     mtx_t* mutexs_to_acquire[] = {
-        &asy_con->send_mtx,
-        &asy_con->mtx
+        &unbuf_con->send_mtx,
+        &unbuf_con->mtx
     };
 
     if (OK !=
@@ -265,12 +277,12 @@ enum OKorERR async_conduit_send_msg(
     }
 
     mtx_t* mutexs_to_release[] = {
-        &asy_con->send_mtx,
-        &asy_con->mtx
+        &unbuf_con->send_mtx,
+        &unbuf_con->mtx
     };
 
-    if (asy_con->closed) {
-        const enum OKorERR _ =
+    if (unbuf_con->closed) {
+        const int _ =
             release_all_mutexs_or_reterr(
                 mutexs_to_release,
                 ARRAY_SIZE(mutexs_to_release)
@@ -279,13 +291,13 @@ enum OKorERR async_conduit_send_msg(
         return ERR;
     }
 
-    asy_con->data = message;
-    asy_con->awaiting_senders++;
+    unbuf_con->data = message;
+    unbuf_con->awaiting_senders++;
 
-    if (asy_con->awaiting_receivers > 0) {
+    if (unbuf_con->awaiting_receivers > 0) {
         /* EVENT: there's a message to receive now. */
-        if (thrd_success != cnd_signal(&asy_con->recv_event)) {
-            const enum OKorERR _ = 
+        if (thrd_success != cnd_signal(&unbuf_con->recv_event)) {
+            const int _ = 
                 release_all_mutexs_or_reterr(
                     mutexs_to_release,
                     ARRAY_SIZE(mutexs_to_release)
@@ -297,10 +309,10 @@ enum OKorERR async_conduit_send_msg(
     /* await the event that the message was consumed. */
     if (thrd_success != 
         cnd_wait(
-            &asy_con->send_event,
-            &asy_con->mtx)
+            &unbuf_con->send_event,
+            &unbuf_con->mtx)
         ) {
-            const enum OKorERR _ = 
+            const int _ = 
                 release_all_mutexs_or_reterr(
                     mutexs_to_release,
                     ARRAY_SIZE(mutexs_to_release)
@@ -317,13 +329,13 @@ enum OKorERR async_conduit_send_msg(
         );
 }
 
-enum OKorERR async_conduit_construct(
-    struct UnbufConduit* asy_con)
+int unbuf_conduit_construct(
+    struct UnbufConduit* unbuf_con)
 {
     mtx_t* mutexs_to_construct[] = {
-        &asy_con->mtx,
-        &asy_con->recv_mtx,
-        &asy_con->send_mtx
+        &unbuf_con->mtx,
+        &unbuf_con->recv_mtx,
+        &unbuf_con->send_mtx
     };
 
     #define MUTEX_COUNT ARRAY_SIZE(mutexs_to_construct)
@@ -354,8 +366,8 @@ enum OKorERR async_conduit_construct(
     }
 
     cnd_t* conditionals_to_construct[] = {
-        &asy_con->send_event,
-        &asy_con->recv_event
+        &unbuf_con->send_event,
+        &unbuf_con->recv_event
     };
 
     for (int i = 0; i < ARRAY_SIZE(conditionals_to_construct); i++) {
@@ -371,21 +383,21 @@ enum OKorERR async_conduit_construct(
                 MUTEX_COUNT
             );
 
-            close_fd_ignore_error(asy_con->recv_event_fd);
+            close_fd_ignore_error(unbuf_con->recv_event_fd);
 
             return ERR;
         } 
     }
 
-    asy_con->closed = false;
-    asy_con->awaiting_receivers = 0;
-    asy_con->awaiting_senders = 0;
-    asy_con->data = NULL;
+    unbuf_con->closed = false;
+    unbuf_con->awaiting_receivers = 0;
+    unbuf_con->awaiting_senders = 0;
+    unbuf_con->data = NULL;
 
     return OK;
 }
 
-enum OKorERR conduit_destruct(
+int conduit_destruct(
     struct Conduit* con)
 {
     ref_q_destruct(&con->queue);  
@@ -408,21 +420,10 @@ enum OKorERR conduit_destruct(
     return OK;
 }
 
-static void close_fd_ignore_error(
-    int fd)
-{
-    if (0 != close(fd)) {
-#ifdef DEBUG
-        perror("failed to close fd");
-        exit(1);
-#endif
-    }
-}
-
-enum OKorERR conduit_construct(
+int conduit_construct(
     struct Conduit* con,
     const size_t capacity,
-    const MemAlloc mem_alloc)
+    const MemoryAllocate mem_alloc)
 {
     if (OK !=
         ref_q_construct(
@@ -491,7 +492,7 @@ static struct timespec ms2ts(
     return ts;
 }
 
-enum OKorERR conduit_recv_msg(
+int conduit_recv_msg(
     struct Conduit* con,
     void** message)
 {
@@ -546,13 +547,13 @@ enum OKorERR conduit_recv_msg(
     }
 
     void* msg = NULL;
-    const enum RefQueueOp dequeue =
+    const int dequeue =
         ref_q_dequeue(
             &con->queue,
             &msg
         );
     
-    if (dequeue == REFQ_OK && NULL != message) {
+    if (dequeue == OK && NULL != message) {
         *message = msg;
     }
 
@@ -562,7 +563,7 @@ enum OKorERR conduit_recv_msg(
         }
     }
 
-    if (REFQ_OK == dequeue 
+    if (OK == dequeue 
     && 0 !=
         eventfd_read(
             con->recv_event_fd,
@@ -574,12 +575,12 @@ enum OKorERR conduit_recv_msg(
 
     return
         relenquish_mtx_ret(&con->mtx, OK) == OK 
-        && REFQ_OK == dequeue
+        && OK == dequeue
         ? OK
         : ERR;
 }
 
-enum OKorERR conduit_send_msg(
+int conduit_send_msg(
     struct Conduit* con,
     void* message)
 {
@@ -614,13 +615,13 @@ enum OKorERR conduit_send_msg(
     }
 
     /* technically, can never return error if the queue loops while full*/
-    const enum RefQueueOp enq =
+    const int enq =
         ref_q_enqueue(
             &con->queue,
             message
         );
 
-    if (enq == REFQ_OK && con->awaiting_recvrs > 0) {
+    if (enq == OK && con->awaiting_recvrs > 0) {
         if (thrd_success !=
             cnd_signal(&con->recv_event)
         ) {
@@ -632,7 +633,7 @@ enum OKorERR conduit_send_msg(
         }
     }
 
-    if (REFQ_OK == enq 
+    if (OK == enq 
     && 0 !=
         eventfd_write(
             con->recv_event_fd,
@@ -644,7 +645,7 @@ enum OKorERR conduit_send_msg(
     
     return
         relenquish_mtx_ret(&con->mtx, OK) == OK
-        && enq == REFQ_OK
+        && enq == OK
         ? OK
         : ERR;
 }
